@@ -1,0 +1,8 @@
+{
+  "title": "Example TV Utility",
+  "apkUrl": "https://your-server.example/files/example-tv-utility.apk",
+  "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "packageName": "com.example.tvutility",
+  "versionName": "1.0.0",
+  "notes": "Replace this sample with your own HTTPS-hosted APK details."
+}

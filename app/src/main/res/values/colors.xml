@@ -1,0 +1,7 @@
+<resources>
+    <color name="cx_bg">#12151C</color>
+    <color name="cx_bg_alt">#1B2230</color>
+    <color name="cx_accent">#43B5FF</color>
+    <color name="cx_text">#F3F7FF</color>
+    <color name="cx_text_muted">#A4B1C9</color>
+</resources>

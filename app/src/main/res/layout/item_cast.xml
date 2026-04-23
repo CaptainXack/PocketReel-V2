@@ -1,7 +1,0 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="wrap_content" android:layout_height="wrap_content"
-    android:orientation="vertical" android:padding="8dp" android:gravity="center">
-    <ImageView android:id="@+id/cast_img" android:layout_width="80dp" android:layout_height="80dp" />
-    <TextView android:id="@+id/cast_name" android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:textColor="#BBBBBB" android:textSize="12sp" />
-</LinearLayout>

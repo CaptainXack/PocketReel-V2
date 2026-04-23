@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-files-path
+        name="download_dir"
+        path="Download/" />
+    <files-path
+        name="internal_download_dir"
+        path="downloads/" />
+</paths>
