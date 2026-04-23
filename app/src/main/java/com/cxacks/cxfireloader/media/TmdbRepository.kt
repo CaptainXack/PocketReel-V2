@@ -37,6 +37,30 @@ class TmdbRepository(
             .take(160)
     }
 
+    fun fetchDiscoverDetail(mediaType: String, id: Int, language: String): DiscoverItem? {
+        if (!isConfigured() || id <= 0) return null
+        val endpoint = when (mediaType.lowercase()) {
+            "movie" -> "https://api.themoviedb.org/3/movie/$id"
+            "tv" -> "https://api.themoviedb.org/3/tv/$id"
+            else -> return null
+        }
+        val root = requestJson(endpoint, language = language, query = null, appendToResponse = "videos") ?: return null
+        val title = when (mediaType.lowercase()) {
+            "movie" -> root.optString("title")
+            else -> root.optString("name")
+        }.ifBlank { "Unknown title" }
+        return DiscoverItem(
+            id = id,
+            mediaType = mediaType,
+            title = title,
+            posterUrl = posterUrl(root.optString("poster_path").ifBlank { null }),
+            backdropUrl = backdropUrl(root.optString("backdrop_path").ifBlank { null }),
+            releaseLabel = root.optString("release_date").ifBlank { root.optString("first_air_date").ifBlank { null } },
+            overview = root.optString("overview").ifBlank { null },
+            trailerUrl = extractTrailerUrl(root.optJSONObject("videos")?.optJSONArray("results")),
+        )
+    }
+
     fun fetchSeasonEpisodeNumbers(tvId: Int, seasonNumber: Int, language: String): List<Int> {
         if (!isConfigured() || seasonNumber < 0) return emptyList()
         val endpoint = "https://api.themoviedb.org/3/tv/$tvId/season/$seasonNumber"
@@ -378,7 +402,7 @@ class TmdbRepository(
 
     private fun buildEpisodeLabel(seasonEpisode: String?, releaseLabel: String?): String? {
         return when {
-            !seasonEpisode.isNullOrBlank() && !releaseLabel.isNullOrBlank() -> "$seasonEpisode • $releaseLabel"
+            !seasonEpisode.isNullOrBlank() && !releaseLabel.isNotBlank() -> "$seasonEpisode • $releaseLabel"
             !seasonEpisode.isNullOrBlank() -> seasonEpisode
             else -> releaseLabel
         }
