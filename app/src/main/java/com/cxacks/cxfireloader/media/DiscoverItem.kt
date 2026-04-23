@@ -8,4 +8,5 @@ data class DiscoverItem(
     val backdropUrl: String? = null,
     val releaseLabel: String? = null,
     val overview: String? = null,
+    val trailerUrl: String? = null,
 )
