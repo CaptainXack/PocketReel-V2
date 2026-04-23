@@ -1,0 +1,16 @@
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:background="#000000">
+    <androidx.media3.ui.PlayerView android:id="@+id/background_trailer"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        xmlns:app="http://schemas.android.com/apk/res-auto" app:use_controller="false" />
+    <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="#AA000000" />
+    <LinearLayout android:layout_width="450dp" android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true" android:layout_margin="50dp" android:orientation="vertical">
+        <TextView android:id="@+id/title_text" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:textSize="50sp" android:textColor="#FFFFFF" android:textStyle="bold" />
+        <Button android:id="@+id/btn_play" android:layout_width="match_parent" android:layout_height="64dp"
+            android:layout_marginTop="20dp" android:text="STREAM NOW" android:backgroundTint="#E50914" android:textColor="#FFFFFF" />
+        <TextView android:id="@+id/storage_status" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="10dp" android:textColor="#888888" android:textSize="14sp" />
+    </LinearLayout>
+</RelativeLayout>
