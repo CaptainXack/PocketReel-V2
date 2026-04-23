@@ -4,6 +4,7 @@ import com.captainxack.pocketreel.BuildConfig
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 
 class TmdbRepository(
@@ -79,6 +80,7 @@ class TmdbRepository(
                     backdropUrl = backdropUrl(entry.optString("backdrop_path").ifBlank { null }),
                     releaseLabel = entry.optString("release_date").ifBlank { entry.optString("first_air_date").ifBlank { null } },
                     overview = entry.optString("overview").ifBlank { null },
+                    trailerUrl = null,
                 ),
             )
         }
@@ -146,6 +148,7 @@ class TmdbRepository(
                     title = buildEpisodeShellTitle(result.title, parsed.seasonEpisode, item.title),
                     artworkUrl = posterUrl(result.posterPath),
                     backdropUrl = backdropUrl(result.backdropPath),
+                    trailerUrl = showDetails?.trailerUrl ?: item.trailerUrl,
                     overview = episodeDetails?.overview ?: item.overview,
                     seriesOverview = result.overview ?: item.seriesOverview,
                     episodeTitle = episodeDetails?.name?.ifBlank { item.episodeTitle } ?: item.episodeTitle,
@@ -166,6 +169,7 @@ class TmdbRepository(
                     title = result.title,
                     artworkUrl = posterUrl(result.posterPath),
                     backdropUrl = backdropUrl(result.backdropPath),
+                    trailerUrl = movieDetails?.trailerUrl ?: item.trailerUrl,
                     overview = movieDetails?.overview ?: result.overview ?: item.overview,
                     releaseLabel = result.releaseLabel,
                     matchSource = "tmdb-movie",
@@ -181,6 +185,7 @@ class TmdbRepository(
                     title = result.title,
                     artworkUrl = posterUrl(result.posterPath),
                     backdropUrl = backdropUrl(result.backdropPath),
+                    trailerUrl = showDetails?.trailerUrl ?: item.trailerUrl,
                     overview = showDetails?.overview ?: result.overview ?: item.overview,
                     releaseLabel = result.releaseLabel,
                     matchSource = "tmdb-tv",
@@ -198,9 +203,10 @@ class TmdbRepository(
 
     private fun fetchMovieDetails(movieId: Int, language: String): DetailPayload? {
         val endpoint = "https://api.themoviedb.org/3/movie/$movieId"
-        val root = requestJson(endpoint, language = language, query = null, appendToResponse = "credits") ?: return null
+        val root = requestJson(endpoint, language = language, query = null, appendToResponse = "credits,videos") ?: return null
         return DetailPayload(
             overview = root.optString("overview").ifBlank { null },
+            trailerUrl = extractTrailerUrl(root.optJSONObject("videos")?.optJSONArray("results")),
             castNames = extractCastNames(root),
             castMembers = extractCastMembers(root),
             genreNames = extractGenres(root),
@@ -209,9 +215,10 @@ class TmdbRepository(
 
     private fun fetchShowDetails(tvId: Int, language: String): DetailPayload? {
         val endpoint = "https://api.themoviedb.org/3/tv/$tvId"
-        val root = requestJson(endpoint, language = language, query = null, appendToResponse = "credits") ?: return null
+        val root = requestJson(endpoint, language = language, query = null, appendToResponse = "credits,videos") ?: return null
         return DetailPayload(
             overview = root.optString("overview").ifBlank { null },
+            trailerUrl = extractTrailerUrl(root.optJSONObject("videos")?.optJSONArray("results")),
             castNames = extractCastNames(root),
             castMembers = extractCastMembers(root),
             genreNames = extractGenres(root),
@@ -339,10 +346,30 @@ class TmdbRepository(
         }
     }
 
+    private fun extractTrailerUrl(results: JSONArray?): String? {
+        if (results == null) return null
+        var fallbackUrl: String? = null
+        for (i in 0 until results.length()) {
+            val video = results.optJSONObject(i) ?: continue
+            val site = video.optString("site").orEmpty()
+            val key = video.optString("key").orEmpty()
+            val type = video.optString("type").orEmpty()
+            if (key.isBlank()) continue
+            val url = when (site.lowercase()) {
+                "youtube" -> "https://www.youtube.com/watch?v=$key"
+                "vimeo" -> "https://vimeo.com/$key"
+                else -> null
+            } ?: continue
+            if (type.equals("Trailer", ignoreCase = true) || type.equals("Teaser", ignoreCase = true)) {
+                return url
+            }
+            if (fallbackUrl == null) fallbackUrl = url
+        }
+        return fallbackUrl
+    }
+
     private fun posterUrl(path: String?): String? = path?.let { "https://image.tmdb.org/t/p/w342$it" }
-
     private fun backdropUrl(path: String?): String? = path?.let { "https://image.tmdb.org/t/p/w780$it" }
-
     private fun profileUrl(path: String?): String? = path?.let { "https://image.tmdb.org/t/p/w185$it" }
 
     private fun buildEpisodeShellTitle(seriesTitle: String, seasonEpisode: String?, fallback: String): String {
@@ -405,6 +432,7 @@ class TmdbRepository(
 
     private data class DetailPayload(
         val overview: String?,
+        val trailerUrl: String?,
         val castNames: List<String>,
         val castMembers: List<CastMember>,
         val genreNames: List<String>,
