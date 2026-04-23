@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -40,6 +41,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,13 +51,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.captainxack.pocketreel.media.MediaItem
 import com.captainxack.pocketreel.media.MediaKind
 import com.captainxack.pocketreel.ui.theme.PocketReelTheme
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
 
 class TrailerHomeActivity : ComponentActivity() {
     private val vm by viewModels<MainViewModel>()
@@ -136,7 +146,7 @@ class TrailerHomeActivity : ComponentActivity() {
 
 private enum class TrailerScreen { Home, Settings }
 
-data class TrailerSeriesGroup(
+private data class TrailerSeriesGroup(
     val title: String,
     val posterUrl: String?,
     val backdropUrl: String?,
@@ -145,6 +155,9 @@ data class TrailerSeriesGroup(
 ) {
     val trailerUrl: String?
         get() = episodes.firstOrNull { !it.trailerUrl.isNullOrBlank() }?.trailerUrl
+
+    val seasonCount: Int
+        get() = episodes.map { it.seasonNumber ?: 0 }.distinct().size
 }
 
 @Composable
@@ -252,7 +265,7 @@ private fun TrailerHomeScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Choose a folder to begin", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("PocketReel will scan your videos, match metadata, and expose visible trailer buttons.")
+                    Text("PocketReel will scan your videos, match metadata, and autoplay trailers inside the hero area.")
                     Button(onClick = onPickFolder) { Text("Pick folder") }
                     if (state.isBusy) {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -298,17 +311,19 @@ private fun SeriesShelf(groups: List<TrailerSeriesGroup>, onOpenSeries: (Trailer
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(end = 6.dp)) {
             items(groups, key = { it.title }) { group ->
                 Column(
-                    modifier = Modifier.width(220.dp).clickable { onOpenSeries(group) },
+                    modifier = Modifier
+                        .width(220.dp)
+                        .clickable { onOpenSeries(group) },
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     PosterArt(group.posterUrl, group.title, 220.dp, 310.dp)
                     Text(group.title, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
-                        "${group.episodes.map { it.seasonNumber ?: 0 }.distinct().size} seasons • ${group.episodes.size} episodes",
+                        "${group.seasonCount} seasons • ${group.episodes.size} episodes",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (!group.trailerUrl.isNullOrBlank()) {
-                        Text("Trailer ready", color = Color(0xFF62B5FF), fontWeight = FontWeight.Medium)
+                        Text("Autoplay trailer ready", color = Color(0xFF62B5FF), fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -330,7 +345,9 @@ private fun MediaShelf(
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(end = 6.dp)) {
             items(items, key = { it.id }) { item ->
                 Column(
-                    modifier = Modifier.width(200.dp).clickable { onPlay(item) },
+                    modifier = Modifier
+                        .width(200.dp)
+                        .clickable { onPlay(item) },
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     PosterArt(item.artworkUrl, item.title, 200.dp, 282.dp)
@@ -358,8 +375,9 @@ private fun SeriesTrailerDetailScreen(
     onPlay: (MediaItem) -> Unit,
     onPlayTrailer: (String, String) -> Unit,
 ) {
-    var detailTab by rememberSaveable { mutableStateOf("Episodes") }
+    var detailTab by rememberSaveable(group.title) { mutableStateOf("Episodes") }
     val leadEpisode = group.episodes.firstOrNull()
+    val inlineVideoId = remember(group.trailerUrl) { extractYouTubeVideoId(group.trailerUrl) }
 
     LazyColumn(
         modifier = Modifier
@@ -373,12 +391,10 @@ private fun SeriesTrailerDetailScreen(
             TextButton(onClick = onBack) { Text("Back") }
         }
         item {
-            AsyncImage(
-                model = group.backdropUrl ?: group.posterUrl,
-                contentDescription = group.title,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp),
+            TrailerHero(
+                title = group.title,
+                trailerVideoId = inlineVideoId,
+                fallbackArtworkUrl = group.backdropUrl ?: group.posterUrl,
             )
         }
         item {
@@ -386,7 +402,7 @@ private fun SeriesTrailerDetailScreen(
                 Text("POCKETREEL SERIES", color = Color(0xFFE50914), fontWeight = FontWeight.Bold)
                 Text(group.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "${group.episodes.map { it.seasonNumber ?: 0 }.distinct().size} Seasons • ${group.episodes.size} Episodes",
+                    "${group.seasonCount} Seasons • ${group.episodes.size} Episodes",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(group.overview ?: leadEpisode?.seriesOverview ?: leadEpisode?.overview ?: "No synopsis yet")
@@ -394,12 +410,17 @@ private fun SeriesTrailerDetailScreen(
                     Button(onClick = { leadEpisode?.let(onPlay) }, enabled = leadEpisode != null) {
                         Text("Play")
                     }
-                    OutlinedButton(
-                        onClick = { group.trailerUrl?.let { onPlayTrailer(it, group.title) } },
-                        enabled = !group.trailerUrl.isNullOrBlank(),
-                    ) {
-                        Text(if (!group.trailerUrl.isNullOrBlank()) "Trailer" else "No trailer")
+                    if (!group.trailerUrl.isNullOrBlank()) {
+                        OutlinedButton(onClick = { onPlayTrailer(group.trailerUrl.orEmpty(), group.title) }) {
+                            Text(if (inlineVideoId != null) "Full trailer" else "Open trailer")
+                        }
                     }
+                }
+                if (inlineVideoId != null) {
+                    Text(
+                        "Trailer should autoplay here muted when the page opens.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -459,6 +480,88 @@ private fun SeriesTrailerDetailScreen(
 }
 
 @Composable
+private fun TrailerHero(
+    title: String,
+    trailerVideoId: String?,
+    fallbackArtworkUrl: String?,
+) {
+    if (trailerVideoId == null) {
+        PosterHeroImage(title = title, artworkUrl = fallbackArtworkUrl)
+        return
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var playerView by remember(trailerVideoId) { mutableStateOf<YouTubePlayerView?>(null) }
+    var showFallback by remember(trailerVideoId) { mutableStateOf(false) }
+
+    DisposableEffect(lifecycleOwner, playerView) {
+        val view = playerView
+        if (view != null) {
+            lifecycleOwner.lifecycle.addObserver(view)
+        }
+        onDispose {
+            if (view != null) {
+                lifecycleOwner.lifecycle.removeObserver(view)
+                view.release()
+            }
+            playerView = null
+        }
+    }
+
+    if (showFallback) {
+        PosterHeroImage(title = title, artworkUrl = fallbackArtworkUrl)
+        return
+    }
+
+    AndroidView(
+        factory = { context ->
+            YouTubePlayerView(context).apply {
+                playerView = this
+                addYouTubePlayerListener(
+                    object : AbstractYouTubePlayerListener() {
+                        override fun onReady(youTubePlayer: YouTubePlayer) {
+                            youTubePlayer.mute()
+                            youTubePlayer.loadVideo(trailerVideoId, 0f)
+                        }
+
+                        override fun onError(youTubePlayer: YouTubePlayer, error: PlayerConstants.PlayerError) {
+                            showFallback = true
+                        }
+                    },
+                )
+            }
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp),
+    )
+}
+
+@Composable
+private fun PosterHeroImage(title: String, artworkUrl: String?) {
+    if (artworkUrl.isNullOrBlank()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(220.dp)
+                .background(Color(0xFF131720)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(title, fontWeight = FontWeight.Bold)
+        }
+    } else {
+        AsyncImage(
+            model = artworkUrl,
+            contentDescription = title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(220.dp),
+        )
+    }
+}
+
+@Composable
 private fun TrailerSettingsScreen(
     state: UiState,
     onBack: () -> Unit,
@@ -485,7 +588,7 @@ private fun TrailerSettingsScreen(
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     TextButton(onClick = onBack) { Text("Back") }
                     Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                    Text("This build focuses on visible trailer actions and stable playback.")
+                    Text("This build focuses on inline hero trailers and stable playback.")
                 }
             }
         }
@@ -560,11 +663,14 @@ private fun TrailerSettingsScreen(
 }
 
 @Composable
-private fun PosterArt(url: String?, title: String, width: androidx.compose.ui.unit.Dp, height: androidx.compose.ui.unit.Dp) {
+private fun PosterArt(url: String?, title: String, width: Dp, height: Dp) {
     AsyncImage(
         model = url,
         contentDescription = title,
-        modifier = Modifier.width(width).height(height),
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .width(width)
+            .height(height),
     )
 }
 
@@ -591,7 +697,9 @@ private fun episodeHeadline(item: MediaItem): String {
     val episode = item.episodeNumber
     val code = if (season != null && episode != null) {
         "S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')}"
-    } else null
+    } else {
+        null
+    }
     val name = item.episodeTitle?.takeIf { it.isNotBlank() }
     return listOfNotNull(code, name ?: item.title).joinToString(" • ")
 }
@@ -603,4 +711,23 @@ private fun formatResumeLabel(positionMs: Long): String {
     val hours = totalMinutes / 60L
     val minutes = totalMinutes % 60L
     return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
+}
+
+private fun extractYouTubeVideoId(url: String?): String? {
+    if (url.isNullOrBlank()) return null
+    val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
+    val host = uri.host.orEmpty().lowercase()
+
+    return when {
+        "youtu.be" in host -> uri.lastPathSegment?.substringBefore('?')
+        "youtube.com" in host -> {
+            val watchId = uri.getQueryParameter("v")?.takeIf { it.isNotBlank() }
+            if (watchId != null) {
+                watchId
+            } else {
+                uri.pathSegments.lastOrNull()?.takeIf { it.isNotBlank() && it != "watch" && it != "embed" }
+            }
+        }
+        else -> null
+    }?.substringBefore('?')
 }
