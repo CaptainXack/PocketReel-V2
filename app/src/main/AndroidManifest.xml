@@ -27,16 +27,6 @@
             android:screenOrientation="sensorLandscape" />
 
         <activity
-            android:name=".MainActivity"
-            android:exported="false"
-            android:banner="@drawable/tv_banner" />
-
-        <activity
-            android:name=".ReelHomeActivity"
-            android:exported="false"
-            android:banner="@drawable/tv_banner" />
-
-        <activity
             android:name=".TrailerHomeActivity"
             android:exported="true"
             android:banner="@drawable/tv_banner">
