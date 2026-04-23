@@ -1,0 +1,7 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="300dp" android:layout_height="wrap_content"
+    android:orientation="vertical" android:padding="8dp" android:background="#1A1A1A" android:layout_margin="4dp">
+    <ImageView android:id="@+id/ep_thumb" android:layout_width="match_parent" android:layout_height="160dp" android:scaleType="centerCrop" />
+    <TextView android:id="@+id/ep_title" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:textColor="#FFFFFF" android:textStyle="bold" android:paddingTop="4dp" />
+</LinearLayout>
