@@ -402,7 +402,7 @@ class TmdbRepository(
 
     private fun buildEpisodeLabel(seasonEpisode: String?, releaseLabel: String?): String? {
         return when {
-            !seasonEpisode.isNullOrBlank() && !releaseLabel.isNotBlank() -> "$seasonEpisode • $releaseLabel"
+            !seasonEpisode.isNullOrBlank() && !releaseLabel.isNullOrBlank() -> "$seasonEpisode • $releaseLabel"
             !seasonEpisode.isNullOrBlank() -> seasonEpisode
             else -> releaseLabel
         }
