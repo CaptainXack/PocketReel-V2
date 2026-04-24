@@ -1,10 +1,12 @@
 package com.captainxack.pocketreel
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
 import android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -15,11 +17,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -42,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +53,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -66,6 +71,7 @@ import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstan
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
+import kotlinx.coroutines.delay
 
 class TrailerHomeActivity : ComponentActivity() {
     private val vm by viewModels<MainViewModel>()
@@ -82,7 +88,7 @@ class TrailerHomeActivity : ComponentActivity() {
                         vm = vm,
                         onPickTree = ::persistTreeAccess,
                         onPlay = ::launchPlayer,
-                        onPlayTrailer = ::launchTrailer,
+                        onWatchTrailer = ::watchTrailerExternally,
                     )
                 }
             }
@@ -126,12 +132,13 @@ class TrailerHomeActivity : ComponentActivity() {
         })
     }
 
-    private fun launchTrailer(trailerUri: String, title: String) {
-        startActivity(Intent(this, PlayerActivity::class.java).apply {
-            putExtra(PlayerActivity.EXTRA_URI, trailerUri)
-            putExtra(PlayerActivity.EXTRA_TITLE, "$title Trailer")
-            putExtra(PlayerActivity.EXTRA_AUTOPLAY_STREAK, 0)
-        })
+    private fun watchTrailerExternally(trailerUri: String, title: String) {
+        val intent = buildExternalTrailerIntent(trailerUri, title)
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "No app available to open trailer", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun buildSeriesPlaylist(item: MediaItem): List<MediaItem> {
@@ -165,7 +172,7 @@ private fun TrailerDeckScreen(
     vm: MainViewModel,
     onPickTree: (Uri) -> Unit,
     onPlay: (MediaItem) -> Unit,
-    onPlayTrailer: (String, String) -> Unit,
+    onWatchTrailer: (String, String) -> Unit,
 ) {
     val state = vm.uiState.value
     var activeScreen by rememberSaveable { mutableStateOf(TrailerScreen.Home) }
@@ -188,7 +195,7 @@ private fun TrailerDeckScreen(
             resumeProgressFractions = state.resumeProgressFractions,
             onBack = { selectedSeriesTitle = null },
             onPlay = onPlay,
-            onPlayTrailer = onPlayTrailer,
+            onWatchTrailer = onWatchTrailer,
         )
 
         activeScreen == TrailerScreen.Settings -> TrailerSettingsScreen(
@@ -265,7 +272,7 @@ private fun TrailerHomeScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Choose a folder to begin", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("PocketReel will scan your videos, match metadata, and autoplay trailers inside the hero area.")
+                    Text("PocketReel will scan your videos, match metadata, and play trailers inline when possible.")
                     Button(onClick = onPickFolder) { Text("Pick folder") }
                     if (state.isBusy) {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -319,11 +326,11 @@ private fun SeriesShelf(groups: List<TrailerSeriesGroup>, onOpenSeries: (Trailer
                     PosterArt(group.posterUrl, group.title, 220.dp, 310.dp)
                     Text(group.title, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
-                        "${group.seasonCount} seasons • ${group.episodes.size} episodes",
+                        formatSeriesSummary(group.seasonCount, group.episodes.size),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (!group.trailerUrl.isNullOrBlank()) {
-                        Text("Autoplay trailer ready", color = Color(0xFF62B5FF), fontWeight = FontWeight.Medium)
+                        Text("Trailer available", color = Color(0xFF62B5FF), fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -373,7 +380,7 @@ private fun SeriesTrailerDetailScreen(
     resumeProgressFractions: Map<String, Float>,
     onBack: () -> Unit,
     onPlay: (MediaItem) -> Unit,
-    onPlayTrailer: (String, String) -> Unit,
+    onWatchTrailer: (String, String) -> Unit,
 ) {
     var detailTab by rememberSaveable(group.title) { mutableStateOf("Episodes") }
     val leadEpisode = group.episodes.firstOrNull()
@@ -402,7 +409,7 @@ private fun SeriesTrailerDetailScreen(
                 Text("POCKETREEL SERIES", color = Color(0xFFE50914), fontWeight = FontWeight.Bold)
                 Text(group.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "${group.seasonCount} Seasons • ${group.episodes.size} Episodes",
+                    formatSeriesSummary(group.seasonCount, group.episodes.size),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(group.overview ?: leadEpisode?.seriesOverview ?: leadEpisode?.overview ?: "No synopsis yet")
@@ -411,16 +418,10 @@ private fun SeriesTrailerDetailScreen(
                         Text("Play")
                     }
                     if (!group.trailerUrl.isNullOrBlank()) {
-                        OutlinedButton(onClick = { onPlayTrailer(group.trailerUrl.orEmpty(), group.title) }) {
-                            Text(if (inlineVideoId != null) "Full trailer" else "Open trailer")
+                        OutlinedButton(onClick = { onWatchTrailer(group.trailerUrl.orEmpty(), group.title) }) {
+                            Text("Watch trailer")
                         }
                     }
-                }
-                if (inlineVideoId != null) {
-                    Text(
-                        "Trailer should autoplay here muted when the page opens.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         }
@@ -444,7 +445,7 @@ private fun SeriesTrailerDetailScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)) {
                             Text(episodeHeadline(episode), fontWeight = FontWeight.Bold)
                             Text(
-                                episode.episodeTitle ?: episode.overview ?: "Episode ready to play",
+                                episodeDescriptionLabel(episode),
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -453,7 +454,7 @@ private fun SeriesTrailerDetailScreen(
                                 episode.documentUri in watchedUris -> "Watched"
                                 (resumePositionsMs[episode.documentUri] ?: 0L) > 0L -> "Resume ${formatResumeLabel(resumePositionsMs[episode.documentUri] ?: 0L)}"
                                 (resumeProgressFractions[episode.documentUri] ?: 0f) > 0f -> "Resume"
-                                else -> episode.releaseLabel ?: "Episode"
+                                else -> episodeMetaLabel(episode)
                             }
                             Text(metaText, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -492,7 +493,17 @@ private fun TrailerHero(
 
     val lifecycleOwner = LocalLifecycleOwner.current
     var playerView by remember(trailerVideoId) { mutableStateOf<YouTubePlayerView?>(null) }
-    var showFallback by remember(trailerVideoId) { mutableStateOf(false) }
+    var playerVisible by remember(trailerVideoId) { mutableStateOf(false) }
+    var showInlinePlayer by remember(trailerVideoId) { mutableStateOf(true) }
+
+    LaunchedEffect(trailerVideoId, playerVisible) {
+        if (!trailerVideoId.isNullOrBlank() && !playerVisible) {
+            delay(4000)
+            if (!playerVisible) {
+                showInlinePlayer = false
+            }
+        }
+    }
 
     DisposableEffect(lifecycleOwner, playerView) {
         val view = playerView
@@ -508,33 +519,48 @@ private fun TrailerHero(
         }
     }
 
-    if (showFallback) {
-        PosterHeroImage(title = title, artworkUrl = fallbackArtworkUrl)
-        return
-    }
-
-    AndroidView(
-        factory = { context ->
-            YouTubePlayerView(context).apply {
-                playerView = this
-                addYouTubePlayerListener(
-                    object : AbstractYouTubePlayerListener() {
-                        override fun onReady(youTubePlayer: YouTubePlayer) {
-                            youTubePlayer.mute()
-                            youTubePlayer.loadVideo(trailerVideoId, 0f)
-                        }
-
-                        override fun onError(youTubePlayer: YouTubePlayer, error: PlayerConstants.PlayerError) {
-                            showFallback = true
-                        }
-                    },
-                )
-            }
-        },
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(220.dp),
-    )
+    ) {
+        PosterHeroImage(title = title, artworkUrl = fallbackArtworkUrl)
+
+        if (showInlinePlayer) {
+            AndroidView(
+                factory = { context ->
+                    YouTubePlayerView(context).apply {
+                        playerView = this
+                        addYouTubePlayerListener(
+                            object : AbstractYouTubePlayerListener() {
+                                override fun onReady(youTubePlayer: YouTubePlayer) {
+                                    youTubePlayer.mute()
+                                    youTubePlayer.loadVideo(trailerVideoId, 0f)
+                                }
+
+                                override fun onStateChange(
+                                    youTubePlayer: YouTubePlayer,
+                                    state: PlayerConstants.PlayerState,
+                                ) {
+                                    if (state == PlayerConstants.PlayerState.PLAYING) {
+                                        playerVisible = true
+                                    }
+                                }
+
+                                override fun onError(youTubePlayer: YouTubePlayer, error: PlayerConstants.PlayerError) {
+                                    playerVisible = false
+                                    showInlinePlayer = false
+                                }
+                            },
+                        )
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(if (playerVisible) 1f else 0f),
+            )
+        }
+    }
 }
 
 @Composable
@@ -543,7 +569,7 @@ private fun PosterHeroImage(title: String, artworkUrl: String?) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(220.dp)
+                .fillMaxHeight()
                 .background(Color(0xFF131720)),
             contentAlignment = Alignment.Center,
         ) {
@@ -556,7 +582,7 @@ private fun PosterHeroImage(title: String, artworkUrl: String?) {
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(220.dp),
+                .fillMaxHeight(),
         )
     }
 }
@@ -704,6 +730,23 @@ private fun episodeHeadline(item: MediaItem): String {
     return listOfNotNull(code, name ?: item.title).joinToString(" • ")
 }
 
+private fun episodeDescriptionLabel(item: MediaItem): String {
+    val episodeTitle = item.episodeTitle?.trim().orEmpty()
+    val fullTitle = item.title.trim()
+    val overview = item.overview?.trim().orEmpty()
+    return when {
+        overview.isNotBlank() && !overview.equals(episodeTitle, ignoreCase = true) && !overview.equals(fullTitle, ignoreCase = true) -> overview
+        episodeTitle.isNotBlank() && !episodeTitle.equals(fullTitle, ignoreCase = true) -> episodeTitle
+        else -> "Episode ready to play"
+    }
+}
+
+private fun episodeMetaLabel(item: MediaItem): String {
+    val raw = item.releaseLabel?.trim().orEmpty()
+    if (raw.isBlank()) return "Episode"
+    return raw.substringAfter('•', raw).trim()
+}
+
 private fun friendlyFolderLabel(value: Any?): String = value?.toString()?.takeIf { it.isNotBlank() } ?: "No folder selected"
 
 private fun formatResumeLabel(positionMs: Long): String {
@@ -711,6 +754,12 @@ private fun formatResumeLabel(positionMs: Long): String {
     val hours = totalMinutes / 60L
     val minutes = totalMinutes % 60L
     return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
+}
+
+private fun formatSeriesSummary(seasons: Int, episodes: Int): String {
+    val seasonLabel = if (seasons == 1) "Season" else "Seasons"
+    val episodeLabel = if (episodes == 1) "Episode" else "Episodes"
+    return "$seasons $seasonLabel • $episodes $episodeLabel"
 }
 
 private fun extractYouTubeVideoId(url: String?): String? {
@@ -730,4 +779,14 @@ private fun extractYouTubeVideoId(url: String?): String? {
         }
         else -> null
     }?.substringBefore('?')
+}
+
+private fun buildExternalTrailerIntent(url: String, title: String): Intent {
+    val youtubeId = extractYouTubeVideoId(url)
+    val targetUri = if (youtubeId != null) {
+        Uri.parse("https://www.youtube.com/watch?v=$youtubeId")
+    } else {
+        Uri.parse(url)
+    }
+    return Intent.createChooser(Intent(Intent.ACTION_VIEW, targetUri), "Open $title trailer")
 }
