@@ -1,16 +1,12 @@
 package com.captainxack.pocketreel
 
-import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.view.Gravity
-import android.view.ViewGroup
-import android.webkit.WebChromeClient
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -27,7 +23,6 @@ import com.captainxack.pocketreel.data.SettingsStore
 class PlayerActivity : ComponentActivity() {
     private var player: ExoPlayer? = null
     private var playerView: PlayerView? = null
-    private var trailerWebView: WebView? = null
     private var documentUri: String? = null
     private var playbackStateStore: PlaybackStateStore? = null
     private var countdownTimer: CountDownTimer? = null
@@ -54,8 +49,9 @@ class PlayerActivity : ComponentActivity() {
         autoplayStreak = intent.getIntExtra(EXTRA_AUTOPLAY_STREAK, 0)
         title = intent.getStringExtra(EXTRA_TITLE) ?: "Now Playing"
 
-        if (isWebTrailerUrl(uriString)) {
-            setContentView(createTrailerWebView(uriString))
+        if (isExternalTrailerUrl(uriString)) {
+            openTrailerExternally(uriString)
+            finish()
             return
         }
 
@@ -111,13 +107,11 @@ class PlayerActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         player?.playWhenReady = true
-        trailerWebView?.onResume()
     }
 
     override fun onStop() {
         persistPlaybackState()
         player?.playWhenReady = false
-        trailerWebView?.onPause()
         countdownTimer?.cancel()
         autoplayDialog?.dismiss()
         super.onStop()
@@ -131,48 +125,7 @@ class PlayerActivity : ComponentActivity() {
         player?.release()
         player = null
         playerView = null
-        trailerWebView?.apply {
-            stopLoading()
-            loadUrl("about:blank")
-            clearHistory()
-            removeAllViews()
-            destroy()
-        }
-        trailerWebView = null
         super.onDestroy()
-    }
-
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun createTrailerWebView(uriString: String): FrameLayout {
-        val root = FrameLayout(this)
-        trailerWebView = WebView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
-            webChromeClient = WebChromeClient()
-            webViewClient = WebViewClient()
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            settings.loadsImagesAutomatically = true
-            loadUrl(buildTrailerEmbedUrl(uriString))
-        }
-        root.addView(trailerWebView)
-        root.addView(
-            LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.END
-                setPadding(24, 40, 24, 24)
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.TOP,
-                )
-                addView(makeOverlayButton("Done") { finish() })
-            },
-        )
-        return root
     }
 
     private fun createOverlayControls(): LinearLayout {
@@ -290,32 +243,54 @@ class PlayerActivity : ComponentActivity() {
 
     private fun persistPlaybackState() {
         val uri = documentUri ?: return
-        if (isWebTrailerUrl(uri)) return
+        if (isExternalTrailerUrl(uri)) return
         val exoPlayer = player ?: return
         val duration = exoPlayer.duration.takeIf { it > 0L } ?: 0L
         val position = exoPlayer.currentPosition.takeIf { it > 0L } ?: 0L
         playbackStateStore?.saveProgress(uri, position, duration)
     }
 
-    private fun isWebTrailerUrl(value: String): Boolean {
-        val lower = value.lowercase()
-        return lower.startsWith("http://") || lower.startsWith("https://")
+    private fun openTrailerExternally(url: String) {
+        val intent = buildExternalTrailerIntent(url)
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "No app available to open trailer", Toast.LENGTH_LONG).show()
+        }
     }
 
-    private fun buildTrailerEmbedUrl(value: String): String {
-        val uri = Uri.parse(value)
+    private fun isExternalTrailerUrl(value: String): Boolean {
+        val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false
+        val host = uri.host.orEmpty().lowercase()
+        return host.contains("youtube.com") || host.contains("youtu.be") || host.contains("vimeo.com")
+    }
+
+    private fun buildExternalTrailerIntent(value: String): Intent {
+        val youtubeId = extractYouTubeVideoId(value)
+        val targetUri = if (youtubeId != null) {
+            Uri.parse("https://www.youtube.com/watch?v=$youtubeId")
+        } else {
+            Uri.parse(value)
+        }
+        return Intent.createChooser(Intent(Intent.ACTION_VIEW, targetUri), "Open trailer")
+    }
+
+    private fun extractYouTubeVideoId(url: String?): String? {
+        if (url.isNullOrBlank()) return null
+        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
         val host = uri.host.orEmpty().lowercase()
         return when {
-            host.contains("youtube.com") || host.contains("youtu.be") -> {
-                val id = uri.getQueryParameter("v") ?: uri.lastPathSegment.orEmpty().substringAfterLast('/')
-                "https://www.youtube.com/embed/$id?autoplay=1&playsinline=1&rel=0"
+            host.contains("youtu.be") -> uri.lastPathSegment?.substringBefore('?')
+            host.contains("youtube.com") -> {
+                val watchId = uri.getQueryParameter("v")?.takeIf { it.isNotBlank() }
+                if (watchId != null) {
+                    watchId
+                } else {
+                    uri.pathSegments.lastOrNull()?.takeIf { it.isNotBlank() && it != "watch" && it != "embed" }
+                }
             }
-            host.contains("vimeo.com") -> {
-                val id = uri.lastPathSegment.orEmpty().substringAfterLast('/')
-                "https://player.vimeo.com/video/$id?autoplay=1"
-            }
-            else -> value
-        }
+            else -> null
+        }?.substringBefore('?')
     }
 
     companion object {
